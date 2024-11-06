@@ -1,0 +1,147 @@
+---
+title: "Fernandez-Blanco-Concepcion-PEC1"
+author: "Coqui Fernandey Blanco"
+date: "2024-10-30"
+output:
+  word_document: default
+  html_document: default
+---
+# PEC 1: Introducción a los datos ómicos  
+
+
+## 1. Introducción  
+
+
+En este informe se analiza un dataset de fosfoproteómica para explorar la diferenciación entre dos grupos tumorales: MSS y PD. El objetivo es identificar fosfopéptidos que permitan diferenciar estos grupos utilizando análisis estadístico y visualización.
+
+Este análisis incluye la selección y preparación de los datos, la creación de un contenedor `SummarizedExperiment`, la exploración de datos, y un análisis multivariante mediante Componentes Principales (PCA).
+
+En mi caso, he seleccionado el siguiente dataset: Datasets/2018-Phosphoproteomics
+  
+  
+### Detalles del dataset seleccionado:  
+
+El conjunto de datos adjunto se ha obtenido a partir de un experimento de fosfoproteómica que se llevó a cabo para analizar (3 + 3) modelos PDX de dos subtipos diferentes utilizando muestras enriquecidas en fosfopéptidos. Se realizó un análisis de LC-MS con 2 réplicas técnicas en cada muestra. El conjunto de resultados consistió en abundancias normalizadas de señales de MS para aproximadamente 1400 fosfopéptidos.
+
+Objetivo del análisis: Buscar fosfopéptidos que permitan diferenciar los dos grupos tumorales. Esto debe hacerse tanto con análisis estadístico como con visualización.
+Los datos se han proporcionado en un archivo de Excel: TIO2+PTYR-human-MSS+MSIvsPD.XLSX.  
+Los grupos se definen como:  
+- Grupo MSS: Muestras M1, M5 y T49.  
+- Grupo PD: Muestras M42, M43 y M64, con dos réplicas técnicas para cada muestra. 
+
+## 2. Preparación y Creación del Contenedor SummarizedExperiment
+
+### Instalación de Paquetes y Carga de Librerías  
+
+
+```{r}
+#instalamos los paquetes necesarios
+#install.packages("BiocManager")
+#BiocManager::install("SummarizedExperiment")
+#install.packages("readxl")
+library(SummarizedExperiment)
+library(readxl)
+library(Biobase)    
+library(ggplot2)  
+library(dplyr)
+```
+
+### Lectura de los datos e identificación de abundancias  
+
+
+```{r}
+datos <- read_excel("C:/Users/fernac53/Documents/1.1._Curso_ Bioinf&Bioest/Asignaturas/Datos_omicos/TIO2+PTYR-human-MSS+MSIvsPD.XLSX",sheet=1)
+targets <- read_excel(path= "C:/Users/fernac53/Documents/1.1._Curso_ Bioinf&Bioest/Asignaturas/Datos_omicos/TIO2+PTYR-human-MSS+MSIvsPD.XLSX", sheet=2)
+dim(datos)
+colnames(datos)
+abundance_data <- as.matrix(datos[, 5:16])  #abundancia
+rownames(abundance_data) <- datos$SequenceModifications  #asignar nombres de fila
+
+#vector de grupos
+groups <- c(rep("MSS", 6), rep("PD", 6))
+
+#dataframe de metadatos
+metadata <- data.frame(Sample = colnames(abundance_data), Group = groups, Phenotype = targets$Phenotype) #con los datos de 'targets', la segunda hoja
+
+#SummarizedExperiment con la nueva metadata
+se <- SummarizedExperiment(assays = list(counts = abundance_data), colData = metadata)
+se
+
+#Guardamos 
+write.csv(abundance_data, "abundance_data.csv", row.names = TRUE)
+save(se, file = "SummarizedExperiment_data.Rda")
+```
+Este contenedor nos permite almacenar tanto los datos de abundancia como los metadatos de las muestras, facilitando un análisis estructurado y accesible.
+
+### 3. Exploración de los Datos  
+
+
+```{r}
+summary(assay(se, "counts"))
+```
+Los datos de abundancia de fosfopeptidos muestran una variabilidad significativa, con algunos valores extremadamente altos que podrían influir en las medias y análisis estadísticos. Las muestras del grupo PD presentan mayores abundancias promedio en comparación con el grupo MSS, lo que sugiere diferencias relevantes entre los grupos. 
+
+### Visualización de los datos  
+
+#### Boxplot   
+
+Añadimos visualización de los datos proporcionados  
+
+```{r}
+boxplot(assay(se, "counts"), main = "Boxplot de las abundancias", las = 2, col = c("lightgreen", "lightcoral"))
+```
+Debido a la naturaleza de los datos (la escala en la que están las abundancias), el gráfico no sale bien, por lo que sería mucho más útil visualizar los datos en escala logarítmica:  
+
+
+#### Boxplot arreglado  
+
+
+```{r}
+boxplot(log10(assay(se, "counts") + 1), las = 2, 
+        main = "Fosfoproteómica: Abundancia en escala log10", col = c("lightblue", "pink"))
+```
+###Análisis de Componentes Principales (PCA)  
+
+
+Para realizar el PCA, hemos usado los datos de se, pero inicialmente, encontramos un error debido a que alguna de las muestras tiene una varianza igual a 0: Error in prcomp.default(t(assay(se, "counts")), scale. = TRUE) : 
+  cannot rescale a constant/zero column to unit variance.
+Por lo que hemos filtrado el set apra realizar el PCA:
+```{r}
+row_variance <- apply(assay(se, "counts"), 1, var, na.rm = TRUE)
+#como da error sin filtrarm hemos de filtrar filas con varianza mayor que cero
+se_filtered <- se[row_variance > 0, ]
+se_filtered
+```
+
+```{r}
+pca_res <- prcomp(t(assay(se_filtered, "counts")), scale. = TRUE)
+pca_data <- data.frame(pca_res$x, Group = colData(se_filtered)$Group)
+pca_data$Sample <- rownames(pca_data)
+ggplot(pca_data, aes(x = PC1, y = PC2, color = Group)) +
+  geom_point(size = 3) +
+  geom_text(aes(label = Sample), vjust = -0.5, hjust = 0.5, size = 3, check_overlap = TRUE) +
+  labs(title = "Análisis PCA de las muestras (sin varianza cero)", x = "PC1", y = "PC2") +
+  theme_minimal()
+```
+
+
+
+
+En el gráfico de componentes principales puede verse bien la distribución de las muestras en el espacio de los dos primeros componentes principales (PC1 y PC2). Se observa una clara separación entre los grupos MSS y PD, lo que sugiere que hay diferencias significativas en las abundancias de los fosfopéptidos que permiten distinguir los dos grupos tumorales. Las muestras del grupo MSS se agrupan en una región diferente a las del grupo PD, lo que refuerza la idea de que los datos tienen características que permiten la diferenciación entre los subtipos estudiados.También parece haber mucha más variabilidad dentro del grupo PD. 
+
+
+
+# Conclusiones
+
+Este análisis de fosfoproteómica muestra una diferenciación entre los grupos tumorales MSS y PD. Los resultados del PCA indican una separación significativa en las abundancias, lo que sugiere que ciertos fosfopéptidos podrían ser biomarcadores útiles para diferenciar entre estos subtipos tumorales.
+
+## Posibles limitaciones y mejoras
+
+- Limitaciones: La alta variabilidad en las abundancias podría afectar la robustez de algunos análisis estadísticos.
+
+- Mejoras: Continuar con anäalisis estadäistico en profundidad para poder comprobar diferenciación entre dos grupos tumorales.
+
+
+# Repositorio en github
+
+https://github.com/cfernandezblan/FERNANDEZ-Blanco-Concepcion-PEC1
